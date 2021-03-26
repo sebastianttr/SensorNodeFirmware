@@ -1,0 +1,180 @@
+void hexdump(const void *mem, uint32_t len, uint8_t cols = 16)
+{
+  const uint8_t *src = (const uint8_t *)mem;
+  Serial.printf("\n[HEXDUMP] Address: 0x%08X len: 0x%X (%d)", (ptrdiff_t)src, len, len);
+  for (uint32_t i = 0; i < len; i++)
+  {
+    if (i % cols == 0)
+    {
+      Serial.printf("\n[0x%08X] 0x%08X: ", (ptrdiff_t)src, i);
+    }
+    Serial.printf("%02X ", *src);
+    src++;
+  }
+  Serial.printf("\n");
+}
+
+void webSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
+{
+
+  switch (type)
+  {
+  case WStype_PONG:
+    break;
+  case WStype_PING:
+    break;
+  case WStype_DISCONNECTED:
+    Serial.printf("[%u] Disconnected!\n", num);
+    websocket_connected = false;
+    vTaskDelete(webSocketTask);
+    break;
+  case WStype_CONNECTED:
+  {
+    IPAddress ip = webSocket.remoteIP(num);
+    Serial.printf("[%u] Connected from %d.%d.%d.%d url: %s\n", num, ip[0], ip[1], ip[2], ip[3], payload);
+    websocket_connected = true;
+    // send message to client
+    webSocket.sendTXT(num, "Connected");
+    Serial.println("Starting a task!");
+    xTaskCreatePinnedToCore(
+        webSocketTaskHandle, /* Task function. */
+        "Task1",             /* name of task. */
+        10000,               /* Stack size of task */
+        NULL,                /* parameter of the task */
+        1,                   /* priority of the task */
+        &webSocketTask,      /* Task handle to keep track of created task */
+        1);                  /* pin task to core 0 */
+  }
+  break;
+  case WStype_TEXT:
+    //Serial.printf("[%u] get Text: %s\n", num, payload);
+
+    // send message to client
+    // webSocket.sendTXT(num, "message here");
+
+    // send data to all connected clients
+    // webSocket.broadcastTXT("message here");
+    break;
+  case WStype_BIN:
+    Serial.printf("[%u] get binary length: %u\n", num, length);
+    hexdump(payload, length);
+
+    // send message to client
+    // webSocket.sendBIN(num, payload, length);
+    break;
+  case WStype_ERROR:
+  case WStype_FRAGMENT_TEXT_START:
+  case WStype_FRAGMENT_BIN_START:
+  case WStype_FRAGMENT:
+  case WStype_FRAGMENT_FIN:
+    break;
+  }
+}
+
+
+void initialize_HTTP_Server()
+{
+  //webSocket.begin();
+  //webSocket.onEvent(webSocketEvent);
+
+  httpd_handle_t server = NULL;
+  httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+  config.max_resp_headers = 1024;
+
+  if (httpd_start(&server, &config) == ESP_OK)
+  {
+    httpd_register_uri_handler(server, &http_setSettings);
+    httpd_register_uri_handler(server, &http_getSettings);
+    httpd_register_uri_handler(server, &http_getCode);
+    httpd_register_uri_handler(server, &http_setCode);
+  }
+}
+
+void webSocketTaskHandle(void *params)
+{
+  for (;;)
+  {
+    const size_t capacity = JSON_ARRAY_SIZE(1) + 2 * JSON_ARRAY_SIZE(3) + JSON_ARRAY_SIZE(6) + JSON_OBJECT_SIZE(1) + 13 * JSON_OBJECT_SIZE(2);
+    DynamicJsonBuffer jsonBuffer(capacity);
+    JsonObject &root = jsonBuffer.createObject();
+    JsonArray &sensors = root.createNestedArray("sensors");
+    JsonObject &sensors_0 = sensors.createNestedObject();
+
+    sensors_0["name"] = "BME280 Sensor";
+    JsonArray &sensors_0_values = sensors_0.createNestedArray("values");
+
+    JsonObject &sensors_0_values_0 = sensors_0_values.createNestedObject();
+    sensors_0_values_0["name"] = "Temperature";
+    sensors_0_values_0["value"] = String(sensor.getTemperature()) + " °C";
+
+    JsonObject &sensors_0_values_1 = sensors_0_values.createNestedObject();
+    sensors_0_values_1["name"] = "Pressure";
+    sensors_0_values_1["value"] = String(sensor.getPressure()) + " Pa";
+
+    JsonObject &sensors_0_values_2 = sensors_0_values.createNestedObject();
+    sensors_0_values_2["name"] = "Altitude";
+    sensors_0_values_2["value"] = "453 m";
+
+    JsonObject &sensors_1 = sensors.createNestedObject();
+    sensors_1["name"] = "MPU6500 Sensor";
+
+    JsonArray &sensors_1_values = sensors_1.createNestedArray("values");
+
+    JsonObject &sensors_1_values_0 = sensors_1_values.createNestedObject();
+    sensors_1_values_0["name"] = "Acceleration X";
+    sensors_1_values_0["value"] = String(sensor.getAccelX_G());
+
+    JsonObject &sensors_1_values_1 = sensors_1_values.createNestedObject();
+    sensors_1_values_1["name"] = "Acceleration Y";
+    sensors_1_values_1["value"] = String(sensor.getAccelY_G());
+
+    JsonObject &sensors_1_values_2 = sensors_1_values.createNestedObject();
+    sensors_1_values_2["name"] = "Acceleration Z";
+    sensors_1_values_2["value"] = String(sensor.getAccelZ_G());
+
+    JsonObject &sensors_1_values_3 = sensors_1_values.createNestedObject();
+    sensors_1_values_3["name"] = "Gyroscope X";
+    sensors_1_values_3["value"] = "NaN";
+
+    JsonObject &sensors_1_values_4 = sensors_1_values.createNestedObject();
+    sensors_1_values_4["name"] = "Gyroscope Y";
+    sensors_1_values_4["value"] = "Nan";
+
+    JsonObject &sensors_1_values_5 = sensors_1_values.createNestedObject();
+    sensors_1_values_5["name"] = "Gyroscope Z";
+    sensors_1_values_5["value"] = "Nan";
+
+    JsonObject &sensors_2 = sensors.createNestedObject();
+    sensors_2["name"] = "VL53L01x Sensor";
+
+    JsonArray &sensors_2_values = sensors_2.createNestedArray("values");
+
+    JsonObject &sensors_2_values_0 = sensors_2_values.createNestedObject();
+    sensors_2_values_0["name"] = "Distance [mm]";
+    sensors_2_values_0["value"] = String(sensor.getDistance_mm()) + " mm";
+
+    JsonObject &sensors_2_values_1 = sensors_2_values.createNestedObject();
+    sensors_2_values_1["name"] = "Distance [cm]";
+    sensors_2_values_1["value"] = String(sensor.getDistance_cm()) + " cm";
+
+    JsonObject &sensors_2_values_2 = sensors_2_values.createNestedObject();
+    sensors_2_values_2["name"] = "Distance [m]";
+    sensors_2_values_2["value"] = String(sensor.getDistance_m()) + " m";
+
+    String jsonString;
+    root.printTo(jsonString);
+
+    webSocket.sendTXT(0, jsonString.c_str());
+    delay(50);
+  }
+}
+
+void initServiceMode()
+{
+  Serial.println("Initilaizing Hardware in Service Mode.");
+  sensor.initSensors();
+  Serial.print("Connecting to AP...\n");
+  connectToAPS();
+  webSocket.begin();
+  webSocket.onEvent(webSocketEvent);
+}
