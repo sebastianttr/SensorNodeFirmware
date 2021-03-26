@@ -1,0 +1,4 @@
+.vscode/
+.pioenvs
+*.bin
+node_modules/
