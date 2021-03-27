@@ -1,8 +1,6 @@
 #include <EIL.h>
 #include <WiFi.h>
 #include <WiFiMulti.h>
-#include <WebSocketsClient.h>
-#include <WebSocketsServer.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
@@ -61,7 +59,6 @@
 Sensor sensor;
 bool websocket_connected = false;
 WiFiMulti wifiMulti;
-WebSocketsClient webSocket;
 TaskHandle_t EILTask;
 void EILTaskPinnedToCore1(void *params);
 
@@ -344,7 +341,7 @@ char *getADC_CH0(char *res)
   }
   //Serial.printf("ADC Reading: %d\n",adc_reading/32);
   //SUPER DUPER BAD , BUT I JUST WORKS
-  //no, justr using char ret[50]; instead of  char *ret = (char *)malloc(50); doesnt work
+  //no, just using char ret[50]; instead of  char *ret = (char *)malloc(50); doesnt work
   char *ret = (char *)malloc(16);
   sprintf(ret, "%d", adc_reading / 32);
   char *retcopy = ret;
@@ -581,42 +578,6 @@ void hexdump(const void *mem, uint32_t len, uint8_t cols = 16)
   }
 }
 
-void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
-{
-  switch (type)
-  {
-  case WStype_DISCONNECTED:
-    Serial.printf("[WSc] Disconnected!\n");
-    break;
-  case WStype_CONNECTED:
-    Serial.printf("[WSc] Connected to url: %s\n", payload);
-    break;
-  case WStype_TEXT:
-    Serial.printf("[WSc] get text: %s\n", payload);
-
-    // send message to server
-    // webSocket.sendTXT("message here");
-    break;
-  case WStype_BIN:
-    Serial.printf("[WSc] get binary length: %u\n", length);
-    hexdump(payload, length);
-
-    // send data to server
-    // webSocket.sendBIN(payload, length);
-    break;
-  case WStype_ERROR:
-    Serial.printf("Error connecting!\n");
-    break;
-  case WStype_FRAGMENT_TEXT_START:
-  case WStype_FRAGMENT_BIN_START:
-  case WStype_FRAGMENT:
-  case WStype_FRAGMENT_FIN:
-  case WStype_PING:
-  case WStype_PONG:
-    break;
-  }
-}
-
 void onEvent(ev_t ev)
 {
   //Serial.print(os_getTime());
@@ -697,23 +658,9 @@ void onEvent(ev_t ev)
   }
 }
 
-void WSOpen(char *res)
-{
-  webSocket.begin("ws://echo.websocket.org", 81, "");
-  webSocket.onEvent(webSocketEvent);
-  websocket_connected = true;
-}
-
-void WSSend(char *res)
-{
-  webSocket.sendTXT((const char *)res);
-}
-
-void WSClose(char *res)
-{
-  webSocket.disconnect();
-  websocket_connected = false;
-}
+void WSOpen(char *res) {}
+void WSSend(char *res) {}
+void WSClose(char *res) {}
 
 void forceTxSingleChannelDr()
 {
@@ -1040,6 +987,23 @@ void initFirmware()
   LoRaSetup();
 }
 
+void upgradeFirmware()
+{
+}
+
+void checkForUpgradeRequest()
+{
+  gpio_config_t io_conf;
+  io_conf.intr_type = GPIO_INTR_DISABLE;
+  io_conf.mode = GPIO_MODE_INPUT;
+  io_conf.pin_bit_mask = (1ULL << GPIO_NUM_36);
+  gpio_config(&io_conf);
+  if (gpio_get_level(GPIO_NUM_36) == 1)
+  {
+    Serial.println("Requesting Upgrade!");
+  }
+}
+
 void createEILTask()
 {
   xTaskCreate(
@@ -1074,6 +1038,7 @@ void setup()
   Serial.println("************************************");
   Serial.println("");
   initFirmware();
+  checkForUpgradeRequest();
 
   eil.initVM();
   eil.registerFunction("Delay", 0xA0, &delay_);
@@ -1172,7 +1137,7 @@ void EILTaskPinnedToCore1(void *params)
   eil.insertScript(loopScript);
   */
   //A1Temp: ;A2%TEMP;A1Pres: ;A2%PRES;A1AX: ;A2%AX;A1AY: ;A2%AY;A1AZ: ;A2%AZ;
-  eil.insertScript("01%AX;0C4.0;02state;01%AX;114.00;02state;A2state;A9[state];AA[10];");
+  eil.insertScript("01%AX;0C4.0;02state;01%AX;114.00;02state;A2state;A9[state];AA[15];");
   for (;;)
   {
     os_runloop_once();
