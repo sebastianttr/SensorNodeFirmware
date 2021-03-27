@@ -65,7 +65,7 @@ void EILTaskPinnedToCore1(void *params);
 EIL eil;
 
 bool wifiConnected = false;
-bool wifiConnectFlag = false;
+bool upgradeRequest = false;
 
 char *initScript;
 char *loopScript;
@@ -107,6 +107,7 @@ const lmic_pinmap lmic_pins = {
 
 static uint16_t startMilis;
 
+void downloadFirmware();
 char *getScript();
 void setScript(const char *script);
 void initialize_HTTP_Server();
@@ -142,15 +143,7 @@ esp_err_t _http_event_handle(esp_http_client_event_t *evt)
     break;
   case HTTP_EVENT_ON_HEADER:
     ESP_LOGI(TAG, "HTTP_EVENT_ON_HEADER");
-    printf("%.*s", evt->data_len, (char *)evt->data);
-    break;
-  case HTTP_EVENT_ON_DATA:
-    ESP_LOGI(TAG, "HTTP_EVENT_ON_DATA, len=%d", evt->data_len);
-    if (!esp_http_client_is_chunked_response(evt->client))
-    {
-      printf("%.*s", evt->data_len, (char *)evt->data);
-    }
-
+    //printf("%.*s", evt->data_len, (char *)evt->data);
     break;
   case HTTP_EVENT_ON_FINISH:
     ESP_LOGI(TAG, "HTTP_EVENT_ON_FINISH");
@@ -158,7 +151,21 @@ esp_err_t _http_event_handle(esp_http_client_event_t *evt)
   case HTTP_EVENT_DISCONNECTED:
     ESP_LOGI(TAG, "HTTP_EVENT_DISCONNECTED");
     break;
-  }
+  case HTTP_EVENT_ON_DATA:
+    //Serial.printf("%.*s", evt->data_len, (char *)evt->data);
+    char *script = (char *)malloc(evt->data_len);
+    sprintf(script, "%.*s", evt->data_len, (char *)evt->data);
+    if (upgradeRequest)
+      setScript(script);
+
+    /*
+    if (!esp_http_client_is_chunked_response(evt->client))
+    {
+      Serial.printf("%s", (char *)evt->data);
+    }
+    */
+    break;
+    }
   return ESP_OK;
 }
 
@@ -454,6 +461,10 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
     tcpip_adapter_ip_info_t ip_info;
     ESP_ERROR_CHECK(tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_STA, &ip_info));
     Serial.printf("IP :  %s\n", ip4addr_ntoa(&ip_info.ip));
+
+    if (upgradeRequest)
+      downloadFirmware();
+
     break;
   case SYSTEM_EVENT_STA_DISCONNECTED:
     esp_wifi_connect();
@@ -746,6 +757,23 @@ void LoRaSend(char *res)
   free(params);
 }
 
+void downloadFirmware()
+{
+  esp_http_client_config_t config = {};
+  config.url = "http://iotdev.htlwy.ac.at/thing/iotusecases2020/getThingscript?value=%22sensornode02%22";
+  config.event_handler = _http_event_handle;
+  esp_http_client_handle_t client = esp_http_client_init(&config);
+  esp_err_t err = esp_http_client_perform(client);
+
+  if (err == ESP_OK)
+  {
+    ESP_LOGI(TAG, "Status = %d, content_length = %d",
+             esp_http_client_get_status_code(client),
+             esp_http_client_get_content_length(client));
+  }
+  esp_http_client_cleanup(client);
+}
+
 char *getScript()
 {
   FILE *f = fopen("/spiffs/script.txt", "r");
@@ -989,6 +1017,10 @@ void initFirmware()
 
 void upgradeFirmware()
 {
+  char *data = (char *)malloc(32);
+  strcpy(data, "[\"2.4\",\"tenerife\"]");
+  WiFiConnect(data);
+  free(data);
 }
 
 void checkForUpgradeRequest()
@@ -1000,7 +1032,8 @@ void checkForUpgradeRequest()
   gpio_config(&io_conf);
   if (gpio_get_level(GPIO_NUM_36) == 1)
   {
-    Serial.println("Requesting Upgrade!");
+    upgradeRequest = true;
+    upgradeFirmware();
   }
 }
 
@@ -1102,8 +1135,10 @@ void setup()
       "loop": "A1HIGH;A01000;A1LOW;A01000;"
     }
   */
-
-  createEILTask(); /* pin task to core 0 */
+  if (!upgradeRequest)
+  {
+    createEILTask(); /* pin task to core 0 */
+  }
 
   /*
     {"init":"A2TRUE;A01000;A2FALSE;A01000;","loop":"A1HIGH;A02000;A1LOW;A02000;"}
