@@ -154,11 +154,11 @@ esp_err_t _http_event_handle(esp_http_client_event_t *evt)
     break;
   case HTTP_EVENT_ON_DATA:
     //Serial.printf("%.*s", evt->data_len, (char *)evt->data);
-    char *script = (char *)malloc(evt->data_len + 1);
+    char *script = (char *)malloc(evt->data_len);
     sprintf(script, "%.*s\n", evt->data_len, (char *)evt->data);
-    Serial.println("\nCode: \n\n " + String(script) + "\n\n");
+    Serial.println("\nCode: \n " + String(script) + "\n\n");
     if (upgradeRequest)
-      setScript("{\"init\":\"A2TRUE;A01000;A2FALSE;A01000;\",\"loop\":\"A1HIGH;A01000;A1LOW;A01000;\"}\n");
+      setScript(script);
 
     /*
     if (!esp_http_client_is_chunked_response(evt->client))
@@ -771,14 +771,16 @@ void LoRaSend(char *res)
 void downloadFirmware(void *params)
 {
   esp_http_client_config_t config = {};
-  config.url = "http://iotdev.htlwy.ac.at/thing/iotusecases2020/getThingscript?value=%22sensornode02%22";
+  config.url = "http://iotdev.htlwy.ac.at/thing/iotusecases2020/getThingscript?value=\"sensornode01\"";
   config.event_handler = _http_event_handle;
+  config.buffer_size = 4096;
   esp_http_client_handle_t client = esp_http_client_init(&config);
+  esp_http_client_set_header(client, "Content-Length", "*");
   esp_err_t err = esp_http_client_perform(client);
 
   if (err == ESP_OK)
   {
-    ESP_LOGI(TAG, "Status = %d, content_length = %d",
+    ESP_LOGE(TAG, "Status = %d, content_length = %d",
              esp_http_client_get_status_code(client),
              esp_http_client_get_content_length(client));
   }
@@ -816,19 +818,15 @@ char *getScript()
 
 void setScript(const char *script)
 {
-  Serial.println("Got here 1!");
   fclose(fopen("/spiffs/script.txt", "w"));
   FILE *f = fopen("/spiffs/script.txt", "w");
   if (f == NULL)
   {
     ESP_LOGE(TAG, "Failed to open file for writing");
   }
-  Serial.println("Got here 2!");
   fprintf(f, script);
   fclose(f);
 
-  //Reset after new script has been uploaded
-  Serial.println("SOFT_RST");
   ESP.restart();
 }
 
@@ -1056,32 +1054,6 @@ void checkForUpgradeRequest()
 
 void createEILTask()
 {
-  eil.initVM();
-  eil.registerFunction("Delay", 0xA0, &delay_);
-  eil.registerFunction("Print", 0xA1, &PRINT);
-  eil.registerFunction("Println", 0xA2, &PRINTLN);
-  eil.registerFunction("WiFiConnect", 0xA3, &WiFiConnect);
-  eil.registerFunction("HttpGet", 0xA4, &HttpGet);
-  eil.registerFunction("HttpPost", 0xA5, &HttpPost);
-  eil.registerFunction("WSOpen", 0xA6, &WSOpen);
-  eil.registerFunction("WSSend", 0xA7, &WSSend);
-  eil.registerFunction("WSClose", 0xA8, &WSClose);
-  eil.registerFunction("LoRaSend", 0xA9, &LoRaSend);
-  eil.registerFunction("Sleep", 0xAA, &goInDeepSleep);
-  eil.registerVariable("%IO26", &getInputOutput26);
-  eil.registerVariable("%IO27", &getInputOutput27);
-  eil.registerVariable("%IO25", &getOutput25);
-  eil.registerVariable("%IADC0", &getADC_CH0);
-  eil.registerVariable("%TEMP", &temp);
-  eil.registerVariable("%PRES", &pres);
-  eil.registerVariable("%AX", &ax);
-  eil.registerVariable("%AY", &ay);
-  eil.registerVariable("%AZ", &az);
-  eil.registerVariable("%TOFM", &ToFm);
-  eil.registerVariable("%TOFCM", &ToFcm);
-  eil.registerVariable("%TOFMM", &ToFmm);
-  eil.registerVariable("HIGH", &_high_);
-  eil.registerVariable("LOW", &_low_);
 
   xTaskCreate(
       EILTaskPinnedToCore1,   /* Task function. */
@@ -1116,6 +1088,33 @@ void setup()
   Serial.println("");
   initFirmware();
   checkForUpgradeRequest();
+
+  eil.initVM();
+  eil.registerFunction("Delay", 0xA0, &delay_);
+  eil.registerFunction("Print", 0xA1, &PRINT);
+  eil.registerFunction("Println", 0xA2, &PRINTLN);
+  eil.registerFunction("WiFiConnect", 0xA3, &WiFiConnect);
+  eil.registerFunction("HttpGet", 0xA4, &HttpGet);
+  eil.registerFunction("HttpPost", 0xA5, &HttpPost);
+  eil.registerFunction("WSOpen", 0xA6, &WSOpen);
+  eil.registerFunction("WSSend", 0xA7, &WSSend);
+  eil.registerFunction("WSClose", 0xA8, &WSClose);
+  eil.registerFunction("LoRaSend", 0xA9, &LoRaSend);
+  eil.registerFunction("Sleep", 0xAA, &goInDeepSleep);
+  eil.registerVariable("%IO26", &getInputOutput26);
+  eil.registerVariable("%IO27", &getInputOutput27);
+  eil.registerVariable("%IO25", &getOutput25);
+  eil.registerVariable("%IADC0", &getADC_CH0);
+  eil.registerVariable("%TEMP", &temp);
+  eil.registerVariable("%PRES", &pres);
+  eil.registerVariable("%AX", &ax);
+  eil.registerVariable("%AY", &ay);
+  eil.registerVariable("%AZ", &az);
+  eil.registerVariable("%TOFM", &ToFm);
+  eil.registerVariable("%TOFCM", &ToFcm);
+  eil.registerVariable("%TOFMM", &ToFmm);
+  eil.registerVariable("HIGH", &_high_);
+  eil.registerVariable("LOW", &_low_);
 
   /*
       Use Case 1:  Fenster Kipp-Zustand
@@ -1174,7 +1173,6 @@ void EILTaskPinnedToCore1(void *params)
   eil.insertScript("03%IO25;A0200;04%IO25;A0200;A2 ;");
   eil.handleVM();
 
-  /*
   // A3[\"2.4\",\"tenerife\"];
 
   const char *script = getScript();
@@ -1183,7 +1181,7 @@ void EILTaskPinnedToCore1(void *params)
   const char *loopScript = getLoop(&script);
   Serial.println(initScript);
   Serial.println(loopScript);
-
+  /*
   eil.insertScript(initScript);
   eil.handleVM();
   eil.insertScript(loopScript);
