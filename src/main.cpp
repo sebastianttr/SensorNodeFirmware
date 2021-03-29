@@ -165,7 +165,7 @@ esp_err_t _http_event_handle(esp_http_client_event_t *evt)
     }
     */
     break;
-    }
+  }
   return ESP_OK;
 }
 
