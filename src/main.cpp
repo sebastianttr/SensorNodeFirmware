@@ -61,6 +61,7 @@ bool websocket_connected = false;
 WiFiMulti wifiMulti;
 TaskHandle_t EILTask;
 void EILTaskPinnedToCore1(void *params);
+TaskHandle_t DownloadFirmwareTask;
 
 EIL eil;
 
@@ -107,7 +108,7 @@ const lmic_pinmap lmic_pins = {
 
 static uint16_t startMilis;
 
-void downloadFirmware();
+void downloadFirmware(void *params);
 char *getScript();
 void setScript(const char *script);
 void initialize_HTTP_Server();
@@ -153,10 +154,11 @@ esp_err_t _http_event_handle(esp_http_client_event_t *evt)
     break;
   case HTTP_EVENT_ON_DATA:
     //Serial.printf("%.*s", evt->data_len, (char *)evt->data);
-    char *script = (char *)malloc(evt->data_len);
-    sprintf(script, "%.*s", evt->data_len, (char *)evt->data);
+    char *script = (char *)malloc(evt->data_len + 1);
+    sprintf(script, "%.*s\n", evt->data_len, (char *)evt->data);
+    Serial.println("\nCode: \n\n " + String(script) + "\n\n");
     if (upgradeRequest)
-      setScript(script);
+      setScript("{\"init\":\"A2TRUE;A01000;A2FALSE;A01000;\",\"loop\":\"A1HIGH;A01000;A1LOW;A01000;\"}\n");
 
     /*
     if (!esp_http_client_is_chunked_response(evt->client))
@@ -463,7 +465,16 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
     Serial.printf("IP :  %s\n", ip4addr_ntoa(&ip_info.ip));
 
     if (upgradeRequest)
-      downloadFirmware();
+    {
+      xTaskCreate(
+          downloadFirmware,     /* Task function. */
+          "downloadFirmware",   /* name of task. */
+          10920,                /* Stack size of task */
+          NULL,                 /* parameter of the task */
+          2,                    /* priority of the task */
+          &DownloadFirmwareTask /* Task handle to keep track of created task */
+      );
+    }
 
     break;
   case SYSTEM_EVENT_STA_DISCONNECTED:
@@ -757,7 +768,7 @@ void LoRaSend(char *res)
   free(params);
 }
 
-void downloadFirmware()
+void downloadFirmware(void *params)
 {
   esp_http_client_config_t config = {};
   config.url = "http://iotdev.htlwy.ac.at/thing/iotusecases2020/getThingscript?value=%22sensornode02%22";
@@ -772,6 +783,7 @@ void downloadFirmware()
              esp_http_client_get_content_length(client));
   }
   esp_http_client_cleanup(client);
+  vTaskSuspend(DownloadFirmwareTask);
 }
 
 char *getScript()
@@ -804,12 +816,14 @@ char *getScript()
 
 void setScript(const char *script)
 {
+  Serial.println("Got here 1!");
   fclose(fopen("/spiffs/script.txt", "w"));
   FILE *f = fopen("/spiffs/script.txt", "w");
   if (f == NULL)
   {
     ESP_LOGE(TAG, "Failed to open file for writing");
   }
+  Serial.println("Got here 2!");
   fprintf(f, script);
   fclose(f);
 
@@ -1029,9 +1043,12 @@ void checkForUpgradeRequest()
   io_conf.intr_type = GPIO_INTR_DISABLE;
   io_conf.mode = GPIO_MODE_INPUT;
   io_conf.pin_bit_mask = (1ULL << GPIO_NUM_36);
+  io_conf.pull_down_en = GPIO_PULLDOWN_ENABLE;
+  //io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
   gpio_config(&io_conf);
   if (gpio_get_level(GPIO_NUM_36) == 1)
   {
+    Serial.println("Requesting Update.");
     upgradeRequest = true;
     upgradeFirmware();
   }
@@ -1039,10 +1056,37 @@ void checkForUpgradeRequest()
 
 void createEILTask()
 {
+  eil.initVM();
+  eil.registerFunction("Delay", 0xA0, &delay_);
+  eil.registerFunction("Print", 0xA1, &PRINT);
+  eil.registerFunction("Println", 0xA2, &PRINTLN);
+  eil.registerFunction("WiFiConnect", 0xA3, &WiFiConnect);
+  eil.registerFunction("HttpGet", 0xA4, &HttpGet);
+  eil.registerFunction("HttpPost", 0xA5, &HttpPost);
+  eil.registerFunction("WSOpen", 0xA6, &WSOpen);
+  eil.registerFunction("WSSend", 0xA7, &WSSend);
+  eil.registerFunction("WSClose", 0xA8, &WSClose);
+  eil.registerFunction("LoRaSend", 0xA9, &LoRaSend);
+  eil.registerFunction("Sleep", 0xAA, &goInDeepSleep);
+  eil.registerVariable("%IO26", &getInputOutput26);
+  eil.registerVariable("%IO27", &getInputOutput27);
+  eil.registerVariable("%IO25", &getOutput25);
+  eil.registerVariable("%IADC0", &getADC_CH0);
+  eil.registerVariable("%TEMP", &temp);
+  eil.registerVariable("%PRES", &pres);
+  eil.registerVariable("%AX", &ax);
+  eil.registerVariable("%AY", &ay);
+  eil.registerVariable("%AZ", &az);
+  eil.registerVariable("%TOFM", &ToFm);
+  eil.registerVariable("%TOFCM", &ToFcm);
+  eil.registerVariable("%TOFMM", &ToFmm);
+  eil.registerVariable("HIGH", &_high_);
+  eil.registerVariable("LOW", &_low_);
+
   xTaskCreate(
       EILTaskPinnedToCore1,   /* Task function. */
       "EILTaskPinnedToCore1", /* name of task. */
-      10000,                  /* Stack size of task */
+      100000,                 /* Stack size of task */
       NULL,                   /* parameter of the task */
       1,                      /* priority of the task */
       &EILTask                /* Task handle to keep track of created task */
@@ -1072,33 +1116,6 @@ void setup()
   Serial.println("");
   initFirmware();
   checkForUpgradeRequest();
-
-  eil.initVM();
-  eil.registerFunction("Delay", 0xA0, &delay_);
-  eil.registerFunction("Print", 0xA1, &PRINT);
-  eil.registerFunction("Println", 0xA2, &PRINTLN);
-  eil.registerFunction("WiFiConnect", 0xA3, &WiFiConnect);
-  eil.registerFunction("HttpGet", 0xA4, &HttpGet);
-  eil.registerFunction("HttpPost", 0xA5, &HttpPost);
-  eil.registerFunction("WSOpen", 0xA6, &WSOpen);
-  eil.registerFunction("WSSend", 0xA7, &WSSend);
-  eil.registerFunction("WSClose", 0xA8, &WSClose);
-  eil.registerFunction("LoRaSend", 0xA9, &LoRaSend);
-  eil.registerFunction("Sleep", 0xAA, &goInDeepSleep);
-  eil.registerVariable("%IO26", &getInputOutput26);
-  eil.registerVariable("%IO27", &getInputOutput27);
-  eil.registerVariable("%IO25", &getOutput25);
-  eil.registerVariable("%IADC0", &getADC_CH0);
-  eil.registerVariable("%TEMP", &temp);
-  eil.registerVariable("%PRES", &pres);
-  eil.registerVariable("%AX", &ax);
-  eil.registerVariable("%AY", &ay);
-  eil.registerVariable("%AZ", &az);
-  eil.registerVariable("%TOFM", &ToFm);
-  eil.registerVariable("%TOFCM", &ToFcm);
-  eil.registerVariable("%TOFMM", &ToFmm);
-  eil.registerVariable("HIGH", &_high_);
-  eil.registerVariable("LOW", &_low_);
 
   /*
       Use Case 1:  Fenster Kipp-Zustand
