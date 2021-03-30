@@ -155,17 +155,11 @@ esp_err_t _http_event_handle(esp_http_client_event_t *evt)
   case HTTP_EVENT_ON_DATA:
     //Serial.printf("%.*s", evt->data_len, (char *)evt->data);
     char *script = (char *)malloc(evt->data_len);
-    sprintf(script, "%.*s\n", evt->data_len, (char *)evt->data);
+    sprintf(script, "%.*s\n", evt->data_len, (const char *)evt->data);
     Serial.println("\nCode: \n " + String(script) + "\n\n");
     if (upgradeRequest)
-      setScript(script);
+      setScript((const char *)script);
 
-    /*
-    if (!esp_http_client_is_chunked_response(evt->client))
-    {
-      Serial.printf("%s", (char *)evt->data);
-    }
-    */
     break;
   }
   return ESP_OK;
