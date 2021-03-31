@@ -109,7 +109,7 @@ const lmic_pinmap lmic_pins = {
 static uint16_t startMilis;
 
 void downloadFirmware(void *params);
-char *getScript();
+const char *getScript();
 void setScript(const char *script);
 void initialize_HTTP_Server();
 
@@ -154,8 +154,8 @@ esp_err_t _http_event_handle(esp_http_client_event_t *evt)
     break;
   case HTTP_EVENT_ON_DATA:
     //Serial.printf("%.*s", evt->data_len, (char *)evt->data);
-    char *script = (char *)malloc(evt->data_len);
-    sprintf(script, "%.*s\n", evt->data_len, (const char *)evt->data);
+    char script[evt->data_len];
+    sprintf(script, "%.*s}\n", evt->data_len, (const char *)evt->data);
     Serial.println("\nCode: \n " + String(script) + "\n\n");
     if (upgradeRequest)
       setScript((const char *)script);
@@ -767,7 +767,6 @@ void downloadFirmware(void *params)
   esp_http_client_config_t config = {};
   config.url = "http://iotdev.htlwy.ac.at/thing/iotusecases2020/getThingscript?value=\"sensornode01\"";
   config.event_handler = _http_event_handle;
-  config.buffer_size = 4096;
   esp_http_client_handle_t client = esp_http_client_init(&config);
   esp_http_client_set_header(client, "Content-Length", "*");
   esp_err_t err = esp_http_client_perform(client);
@@ -782,7 +781,7 @@ void downloadFirmware(void *params)
   vTaskSuspend(DownloadFirmwareTask);
 }
 
-char *getScript()
+const char *getScript()
 {
   FILE *f = fopen("/spiffs/script.txt", "r");
   if (f == NULL)
@@ -818,25 +817,25 @@ void setScript(const char *script)
   {
     ESP_LOGE(TAG, "Failed to open file for writing");
   }
-  fprintf(f, script);
+  fprintf(f, "%s", script);
   fclose(f);
 
   ESP.restart();
 }
 
-const char *getInit(const char **jsonString)
+const char *getInit(const char *jsonString)
 {
   const size_t capacity = JSON_OBJECT_SIZE(2) + 80;
   DynamicJsonBuffer jsonBuffer(capacity);
-  JsonObject &root = jsonBuffer.parseObject(*jsonString);
+  JsonObject &root = jsonBuffer.parseObject(jsonString);
   return root["init"];
 }
 
-const char *getLoop(const char **jsonString)
+const char *getLoop(const char *jsonString)
 {
   const size_t capacity = JSON_OBJECT_SIZE(2) + 80;
   DynamicJsonBuffer jsonBuffer(capacity);
-  JsonObject &root = jsonBuffer.parseObject(*jsonString);
+  JsonObject &root = jsonBuffer.parseObject(jsonString);
   return root["loop"];
 }
 
@@ -1021,7 +1020,7 @@ void initFirmware()
   LoRaSetup();
 }
 
-void upgradeFirmware()
+void upgradeScipt()
 {
   char *data = (char *)malloc(32);
   strcpy(data, "[\"2.4\",\"tenerife\"]");
@@ -1042,13 +1041,13 @@ void checkForUpgradeRequest()
   {
     Serial.println("Requesting Update.");
     upgradeRequest = true;
-    upgradeFirmware();
+    upgradeScipt();
   }
 }
 
 void createEILTask()
 {
-
+  Serial.println("Creating EIL Task");
   xTaskCreate(
       EILTaskPinnedToCore1,   /* Task function. */
       "EILTaskPinnedToCore1", /* name of task. */
@@ -1059,9 +1058,10 @@ void createEILTask()
   );
 }
 
+//ESP.wdtDisable();
+
 void setup()
 {
-  //ESP.wdtDisable();
   wifi_event_group = xEventGroupCreate();
   esp_err_t ret = nvs_flash_init();
   if (ret == ESP_ERR_NVS_NO_FREE_PAGES)
@@ -1071,7 +1071,6 @@ void setup()
   }
 
   Serial.begin(115200);
-  startMilis = millis();
   Serial.println("************************************");
   Serial.println("*                                  *");
   Serial.println("*     Sensor Node Firmware V1.0    *");
@@ -1090,9 +1089,6 @@ void setup()
   eil.registerFunction("WiFiConnect", 0xA3, &WiFiConnect);
   eil.registerFunction("HttpGet", 0xA4, &HttpGet);
   eil.registerFunction("HttpPost", 0xA5, &HttpPost);
-  eil.registerFunction("WSOpen", 0xA6, &WSOpen);
-  eil.registerFunction("WSSend", 0xA7, &WSSend);
-  eil.registerFunction("WSClose", 0xA8, &WSClose);
   eil.registerFunction("LoRaSend", 0xA9, &LoRaSend);
   eil.registerFunction("Sleep", 0xAA, &goInDeepSleep);
   eil.registerVariable("%IO26", &getInputOutput26);
@@ -1110,89 +1106,26 @@ void setup()
   eil.registerVariable("HIGH", &_high_);
   eil.registerVariable("LOW", &_low_);
 
-  /*
-      Use Case 1:  Fenster Kipp-Zustand
-
-      < 5.00 -> geschlossen
-      > 5.00 -> offen
-
-
-      01%AX;0C5.00;02state;01%AX;115.00;02state;01state;0ETRUE;01
-      
-
-      Use Case 2:
-  
-  */
-  //eil.insertScript("A1HIGH;A01000;A2LOW;A01000;"); //0113.2;0C187.02;02c;012002.20;0Fb;02d;01TRUE;05FALSE;06TRUE;07FALSE;02e;0113;08187;0A10;0810;0A187;A0500;02f;01TEMP;02g;
-  //For Expressions:
-  /*
-    LD FALSE    
-    ST A
-
-    LD TRUE
-    ST B
-
-    LD FALSE
-    ST C
-
-    output:
-    01FALSE;02A;01TRUE;02B;01FALSE;02C;01C;14A;06B;2Ax;02D;\0
-
-    Format zum Speichern von neuen Scripts:
-
-    {
-      "init": "A2TRUE;A01000;A2FALSE;A01000;",
-      "loop": "A1HIGH;A01000;A1LOW;A01000;"
-    }
-  */
   if (!upgradeRequest)
-  {
     createEILTask(); /* pin task to core 0 */
-  }
-
-  /*
-    {"init":"A2TRUE;A01000;A2FALSE;A01000;","loop":"A1HIGH;A02000;A1LOW;A02000;"}
-
-    {\"init\":\"A2TRUE;A01000;A2FALSE;A01000;\",\"loop\":\"A1HIGH;A02000;A1LOW;A02000;\"}\0
-
-    // THIS IS WORKING @02.02.2021
-    {"name":"sensornode02","init":"A1HIGH;A02000;A1LOW;A02000;","loop":"A1HIGH;A01000;A1LOW;A01000;"}
-  */
-  //setScript("{\"init\":\"A2TRUE;A01000;A2FALSE;A01000;\",\"loop\":\"A1HIGH;A02000;A1LOW;A02000;\"}\n");
-  //eil.insertScript("0110;02%IO25;A01000;010;02%IO25;A01000;");
 }
 
 void EILTaskPinnedToCore1(void *params)
 {
-  eil.insertScript("03%IO25;A0200;04%IO25;A0200;A2 ;");
-  eil.handleVM();
-
   // A3[\"2.4\",\"tenerife\"];
-
-  const char *script = getScript();
-  Serial.println(script);
-  const char *initScript = getInit(&script);
-  const char *loopScript = getLoop(&script);
-  Serial.println(initScript);
-  Serial.println(loopScript);
-  /*
-  eil.insertScript(initScript);
+  eil.insertScript(getInit(getScript()));
   eil.handleVM();
-  eil.insertScript(loopScript);
-  */
+  eil.insertScript(getLoop(getScript()));
+
   //A1Temp: ;A2%TEMP;A1Pres: ;A2%PRES;A1AX: ;A2%AX;A1AY: ;A2%AY;A1AZ: ;A2%AZ;
-  eil.insertScript("01%AX;0C4.0;02state;01%AX;114.00;02state;A2state;A9[state];AA[15];");
+  //eil.insertScript("01%AX;0C4.0;02state;01%AX;114.00;02state;A2state;A9[state];AA[15];");
   for (;;)
   {
-    os_runloop_once();
-    esp_task_wdt_reset();
     eil.handleVM();
   }
 }
 
 void loop()
 {
-  esp_task_wdt_reset();
-  os_runloop_once();
   serialCheck();
 }
