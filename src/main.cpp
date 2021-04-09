@@ -106,8 +106,6 @@ const lmic_pinmap lmic_pins = {
 
 /***************************************LORA STUFF*************************************/
 
-static uint16_t startMilis;
-
 void downloadFirmware(void *params);
 const char *getScript();
 void setScript(const char *script);
@@ -785,10 +783,8 @@ const char *getScript()
 {
   FILE *f = fopen("/spiffs/script.txt", "r");
   if (f == NULL)
-  {
-    ESP_LOGE(TAG, "Failed to open file for reading");
-    setScript("{\"init\":\"A2TRUE;A01000;A2FALSE;A01000;\",\"loop\":\"A1HIGH;A01000;A1LOW;A01000;\"}\n");
-  }
+    Serial.println("Failed to open file for reading");
+
   int prev = ftell(f);
   fseek(f, 0L, SEEK_END);
   int size = ftell(f);
@@ -1047,14 +1043,14 @@ void checkForUpgradeRequest()
 
 void createEILTask()
 {
-  Serial.println("Creating EIL Task");
-  xTaskCreate(
-      EILTaskPinnedToCore1,   /* Task function. */
-      "EILTaskPinnedToCore1", /* name of task. */
-      100000,                 /* Stack size of task */
-      NULL,                   /* parameter of the task */
-      1,                      /* priority of the task */
-      &EILTask                /* Task handle to keep track of created task */
+  xTaskCreatePinnedToCore(
+      EILTaskPinnedToCore1,   /* Funktion, die ausgeführt wird */
+      "EILTaskPinnedToCore1", /* Taskname */
+      100000,                 /* Stapelspeichergröße */
+      NULL,                   /* Übergabeparameter */
+      1,                      /* Task Priorität (1 da nur eine Task rennt) */
+      &EILTask,               /* Adresse der EILTask für Task-Kontrolle */
+      1                       /* Task rennt auf Core 1 = 2. Kern */
   );
 }
 
@@ -1112,13 +1108,10 @@ void setup()
 
 void EILTaskPinnedToCore1(void *params)
 {
-  // A3[\"2.4\",\"tenerife\"];
   eil.insertScript(getInit(getScript()));
   eil.handleVM();
   eil.insertScript(getLoop(getScript()));
 
-  //A1Temp: ;A2%TEMP;A1Pres: ;A2%PRES;A1AX: ;A2%AX;A1AY: ;A2%AY;A1AZ: ;A2%AZ;
-  //eil.insertScript("01%AX;0C4.0;02state;01%AX;114.00;02state;A2state;A9[state];AA[15];");
   for (;;)
   {
     eil.handleVM();
