@@ -1108,6 +1108,8 @@ void setup()
 
 void EILTaskPinnedToCore1(void *params)
 {
+  Serial.println(getInit(getScript()));
+  Serial.println(getLoop(getScript()));
   eil.insertScript(getInit(getScript()));
   eil.handleVM();
   eil.insertScript(getLoop(getScript()));

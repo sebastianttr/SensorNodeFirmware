@@ -9,51 +9,51 @@
 
 /************OPERATORS USED FOR INTERPRETING*************/
 
-#define LD 0x01    //Done
-#define ST 0x02    //Done
-#define S 0x03     //Done
-#define R 0x04     //Done
-#define AND 0x05   //Done
-#define OR 0x06    //Done
-#define XOR 0x07   //Done
-#define ADD 0x08   //Done
-#define SUB 0x09   //Done
-#define MUL 0x0A   //Done
-#define DIV 0x0B   //Done
-#define GT 0x0C    //Done
-#define GE 0x0D    //Done
-#define EQ 0x0E    //Done
-#define NE 0x0F    //Done
-#define LE 0x10    //Done
-#define LT 0x11    //Done
-#define ANDN 0x12  //Done
-#define ANDE 0x13  // AND(  //Done
-#define ANDNE 0x14 // ANDN( //Done
-#define ORN 0x15   //Done
-#define ORE 0x16   // OR(  //Done
-#define ORNE 0x17  // ORN( //Done
-#define XORN 0x18  //Done
-#define XORE 0x19  // XOR(  //Done
-#define XORNE 0x1A // XORN( //Done
-#define LDN 0x1B   //Done
-#define STN 0x1C   //Done
-#define ADDE 0x1D  //ADD(  //Done
-#define SUBE 0x1E  //Done
-#define MULE 0x1F  //Done
-#define DIVE 0x20  //Done
-#define GTE 0x21   //Done
-#define GEE 0x22   //Done
-#define EQE 0x23   //Done
-#define NEE 0x24   //Done
-#define LEE 0x25   //Done
-#define LTE 0x26   //Done
-#define JMP 0x27   //Done
-#define JMPC 0x28  //Done
-#define JMPCN 0x29 //Done
-#define CAL 0x2A
+#define LD 0x01     //Done
+#define ST 0x02     //Done
+#define S 0x03      //Done
+#define R 0x04      //Done
+#define AND 0x05    //Done
+#define OR 0x06     //Done
+#define XOR 0x07    //Done
+#define ADD 0x08    //Done
+#define SUB 0x09    //Done
+#define MUL 0x0A    //Done
+#define DIV 0x0B    //Done
+#define GT 0x0C     //Done
+#define GE 0x0D     //Done
+#define EQ 0x0E     //Done
+#define NE 0x0F     //Done
+#define LE 0x10     //Done
+#define LT 0x11     //Done
+#define ANDN 0x12   //Done
+#define ANDE 0x13   // AND(  //Done
+#define ANDNE 0x14  // ANDN( //Done
+#define ORN 0x15    //Done
+#define ORE 0x16    // OR(  //Done
+#define ORNE 0x17   // ORN( //Done
+#define XORN 0x18   //Done
+#define XORE 0x19   // XOR(  //Done
+#define XORNE 0x1A  // XORN( //Done
+#define LDN 0x1B    //Done
+#define STN 0x1C    //Done
+#define ADDE 0x1D   //ADD(  //Done
+#define SUBE 0x1E   //Done
+#define MULE 0x1F   //Done
+#define DIVE 0x20   //Done
+#define GTE 0x21    //Done
+#define GEE 0x22    //Done
+#define EQE 0x23    //Done
+#define NEE 0x24    //Done
+#define LEE 0x25    //Done
+#define LTE 0x26    //Done
+#define JMP 0x27    //Done
+#define JMPC 0x28   //Done
+#define JMPCN 0x29  //Done
+#define JMPBCK 0x2A //Done
 #define CALC 0x2B
 #define CALCN 0x2C
-#define RET 0x2D //Done
+#define RET 0x2D
 #define RETC 0x2E
 #define RETCN 0x2F
 #define EXC 0x30 //Expression close -> ) -> recursion   //Done
@@ -463,6 +463,9 @@ void EIL::execute(char **lines)
   bool reExec = false;
   char *reExecLine = {0};
   char *line = (char *)malloc(1024);
+  uint32_t *jumpback = (uint32_t *)malloc(32);
+  uint32_t jumpbackIndex = 0;
+
   while (programCounter < n_lines)
   {
     strcpy(line, (reExec == true) ? reExecLine : lines[programCounter]);
@@ -994,8 +997,8 @@ void EIL::execute(char **lines)
     }
     else if (opHEX == (uint8_t)JMP)
     {
-      //uint16_t pos = getMarkerPos((char *)arg.c_str());
-      Serial.println("Jumping");
+      jumpback[jumpbackIndex] = programCounter;
+      jumpbackIndex++;
       programCounter = atoi(arg.c_str());
       continue;
     }
@@ -1003,17 +1006,31 @@ void EIL::execute(char **lines)
     {
       if (strcmp(stackPop(), "TRUE") == 0)
       {
+        Serial.println("Got here 1");
+        jumpback[jumpbackIndex] = programCounter;
+        Serial.println("Got here 2");
+        jumpbackIndex++;
+        Serial.println("Got here 3");
         programCounter = atoi(arg.c_str());
         continue;
       }
     }
     else if (opHEX == (uint8_t)JMPCN)
     {
+
       if (strcmp(stackPop(), "FALSE") == 0)
       {
+        jumpback[jumpbackIndex] = programCounter;
+        jumpbackIndex++;
         programCounter = atoi(arg.c_str());
         continue;
       }
+    }
+    else if (opHEX == (uint8_t)JMPBCK)
+    {
+      programCounter = jumpback[jumpbackIndex];
+      jumpbackIndex--;
+      continue;
     }
     else
     {
